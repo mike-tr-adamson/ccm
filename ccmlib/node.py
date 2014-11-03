@@ -71,6 +71,7 @@ class Node(object):
         self.pid = None
         self.data_center = None
         self.workload = None
+        self._dse_config_options = {}
         self.__config_options = {}
         self.__install_dir = None
         self.__global_log_level = None
@@ -110,6 +111,8 @@ class Node(object):
                 node.__install_dir = data['install_dir']
             if 'config_options' in data:
                 node.__config_options = data['config_options']
+            if 'dse_config_options' in data:
+                node._dse_config_options = data['dse_config_options']
             if 'data_center' in data:
                 node.data_center = data['data_center']
             if 'workload' in data:
@@ -219,6 +222,12 @@ class Node(object):
                 self.__config_options["commitlog_sync_batch_window_in_ms"] = None
 
         self.import_config_files()
+
+    def set_dse_configuration_options(self, values=None):
+        pass
+
+    def set_xml_configuration_options(self, product=None, file=None, values=None):
+        pass
 
     def show(self, only_status=False, show_cluster=True):
         """
@@ -414,7 +423,8 @@ class Node(object):
               jvm_args=[],
               wait_for_binary_proto=True,
               profile_options=None,
-              use_jna=False):
+              use_jna=False,
+              debug=False):
         """
         Start the node. Options includes:
           - join_ring: if false, start the node with -Dcassandra.join_ring=False
@@ -626,6 +636,15 @@ class Node(object):
     def sqoop(self, sqoop_options=[]):
         raise common.ArgumentError('Cassandra nodes do not support sqoop')
 
+    def kinit(self, principal):
+        raise common.ArgumentError('Cassandra nodes do not support kerberos authentication')
+
+    def klist(self):
+        raise common.ArgumentError('Cassandra nodes do not support kerberos authentication')
+
+    def kdestroy(self):
+        raise common.ArgumentError('Cassandra nodes do not support kerberos authentication')
+
     def scrub(self, options):
         scrub_bin = self.get_tool('sstablescrub')
         env = common.make_cassandra_env(self.get_install_cassandra_root(), self.get_node_cassandra_root())
@@ -664,8 +683,17 @@ class Node(object):
             port = self.network_interfaces['binary'][1]
         else:
             port = self.network_interfaces['thrift'][1]
+
+        if self.cluster.authn == 'kerberos':
+            env['KRB5_CONFIG'] = os.path.join(self.cluster.get_path(), 'krb5.conf')
+            env['KRB5CCNAME'] = os.path.join(self.get_path(), 'krb5_ticket')
+            env['KRB_HOSTNAME'] = 'localhost'
+            env['KRB_SERVICE'] = 'dse_%s' % self.name
+            cqlsh_options += ['--transport=cqlshlib.kerberos.kerberos_transport_factory']
+
         args = cqlsh_options + [ host, str(port) ]
         sys.stdout.flush()
+
         if cmds is None:
             os.execve(cqlsh, [ common.platform_binary('cqlsh') ] + args, env)
         else:
@@ -882,6 +910,7 @@ class Node(object):
         self._update_config()
         self.copy_config_files()
         self.__update_yaml()
+        self._update_dse_yaml()
         #loggers changed > 2.1
         if self.get_base_cassandra_version() < 2.1:
             self.__update_log4j()
@@ -949,6 +978,7 @@ class Node(object):
 
     def _save(self):
         self.__update_yaml()
+        self._update_dse_yaml()
         #loggers changed > 2.1
         if self.get_base_cassandra_version() < 2.1:
             self.__update_log4j()
@@ -972,6 +1002,7 @@ class Node(object):
             'interfaces' : self.network_interfaces,
             'jmx_port' : self.jmx_port,
             'config_options' : self.__config_options,
+            'dse_config_optios' : self._dse_config_options
         }
         if self.pid:
             values['pid'] = self.pid
@@ -989,6 +1020,9 @@ class Node(object):
             values['workload'] = self.workload
         with open(filename, 'w') as f:
             yaml.safe_dump(values, f)
+
+    def _update_dse_yaml(self):
+        pass
 
     def __update_yaml(self):
         conf_file = os.path.join(self.get_conf_dir(), common.CASSANDRA_CONF)

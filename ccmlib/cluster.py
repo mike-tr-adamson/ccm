@@ -15,7 +15,7 @@ from ccmlib.node import Node, NodeError
 from ccmlib.bulkloader import BulkLoader
 
 class Cluster(object):
-    def __init__(self, path, name, partitioner=None, install_dir=None, create_directory=True, version=None, verbose=False, **kwargs):
+    def __init__(self, path, name, partitioner=None, install_dir=None, create_directory=True, version=None, authn=None, authz=None, verbose=False, **kwargs):
         self.name = name
         self.nodes = {}
         self.seeds = []
@@ -26,6 +26,8 @@ class Cluster(object):
         self.__path = path
         self.__version = None
         self.use_vnodes = False
+        self.authn = authn
+        self.authz = authz
 
         ##This is incredibly important for
         ##backwards compatibility.
@@ -55,6 +57,8 @@ class Cluster(object):
             if create_directory:
                 common.validate_install_dir(self.__install_dir)
                 self._update_config()
+
+            self.install_extras(verbose)
         except:
             if create_directory:
                 shutil.rmtree(self.get_path())
@@ -62,6 +66,13 @@ class Cluster(object):
 
     def load_from_repository(self, version, verbose):
         return repository.setup(version, verbose)
+
+    def install_extras(self, verbose):
+        if self.authn == 'password':
+            self.set_configuration_options(values={'authenticator' : 'PasswordAuthenticator'})
+        if self.authz == 'cassandra':
+            self.set_configuration_options(values={'authorizer' : 'CassandraAuthorizer'})
+        pass
 
     def set_partitioner(self, partitioner):
         self.partitioner = partitioner
@@ -235,7 +246,7 @@ class Cluster(object):
             else:
                 node.show(only_status=True)
 
-    def start(self, no_wait=False, verbose=False, wait_for_binary_proto=True, wait_other_notice=False, jvm_args=[], profile_options=None):
+    def start(self, no_wait=False, verbose=False, wait_for_binary_proto=True, wait_other_notice=False, jvm_args=[], profile_options=None, debug=False):
         if wait_other_notice:
             marks = [ (node, node.mark_log()) for node in list(self.nodes.values()) if node.is_running() ]
 
@@ -246,7 +257,7 @@ class Cluster(object):
                 if os.path.exists(node.logfilename()):
                     mark = node.mark_log()
 
-                p = node.start(update_pid=False, jvm_args=jvm_args, profile_options=profile_options)
+                p = node.start(update_pid=False, jvm_args=jvm_args, profile_options=profile_options, debug=debug)
                 started.append((node, p, mark))
 
         if no_wait and not verbose:
@@ -353,6 +364,9 @@ class Cluster(object):
     def set_dse_configuration_options(self, values=None):
         raise common.ArgumentError('Cannot set DSE configuration options on a Cassandra cluster')
 
+    def set_xml_configuration_options(self, product=None, file=None, values=None):
+        raise common.ArgumentError('Cannot set hadoop configuration options on a Cassandra cluster')
+
     def flush(self):
         self.nodetool("flush")
 
@@ -394,6 +408,12 @@ class Cluster(object):
         for node in self.nodelist():
             node.update_logback(new_logback_config)
 
+    def add_ldap_user(self, userid, password):
+        raise common.ArgumentError("LDAP and Kerberos authentication are not supported on Cassandra clusters")
+
+    def delete_ldap_user(self, userid):
+        raise common.ArgumentError("LDAP and Kerberos authentication are not supported on Cassandra clusters")
+
     def __get_version_from_build(self):
         return common.get_version_from_build(self.get_install_dir())
 
@@ -411,7 +431,9 @@ class Cluster(object):
                 'config_options' : self._config_options,
                 'dse_config_options' : self._dse_config_options,
                 'log_level' : self.__log_level,
-                'use_vnodes' : self.use_vnodes
+                'use_vnodes' : self.use_vnodes,
+                'authn' : self.authn,
+                'authz' : self.authz
             }, f)
 
     def __update_pids(self, started):
