@@ -37,7 +37,8 @@ def cluster_cmds():
         "scrub",
         "invalidatecache",
         "adduser",
-        "deleteuser"
+        "deleteuser",
+        "updatexmlconf"
     ]
 
 def parse_populate_count(v):
@@ -809,6 +810,27 @@ class ClusterAdduserCmd(Cmd):
         except common.ArgumentError as e:
             print_(str(e), file=sys.stderr)
             exit(1)
+
+class ClusterUpdatexmlconfCmd(Cmd):
+    def description(self):
+        return "Update the dse hadoop/sqoop/hive site configuration files."
+
+    def get_parser(self):
+        usage = "usage: ccm updatexmlconf [hadoop, sqoop, hive] [property:value, ...]"
+        parser = self._get_default_parser(usage, self.description())
+        return parser
+
+    def validate(self, parser, options, args):
+        Cmd.validate(self, parser, options, args, load_cluster=True)
+        try:
+            self.product = args[0]
+            self.setting = common.parse_settings(args[1:])
+        except common.ArgumentError as e:
+            print_(str(e), file=sys.stderr)
+            exit(1)
+
+    def run(self):
+        self.cluster.set_xml_configuration_options(product=self.product, values=self.setting)
 
 class ClusterDeleteuserCmd(Cmd):
     def description(self):
