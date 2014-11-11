@@ -5,9 +5,9 @@ import subprocess
 import signal
 import stat
 import time
+import getpass
 
-from six import iteritems
-from lxml import etree
+from six import print_, iteritems
 from ccmlib import repository
 from ccmlib.cluster import Cluster
 from ccmlib.dse_node import DseNode
@@ -55,9 +55,9 @@ class DseCluster(Cluster):
     def create_node(self, name, auto_bootstrap, thrift_interface, storage_interface, jmx_port, remote_debug_port, initial_token, save=True, binary_interface=None):
         return DseNode(name, self, auto_bootstrap, thrift_interface, storage_interface, jmx_port, remote_debug_port, initial_token, save, binary_interface)
 
-    def start(self, no_wait=False, verbose=False, wait_for_binary_proto=False, wait_other_notice=False, jvm_args=[], profile_options=None):
+    def start(self, no_wait=False, verbose=False, wait_for_binary_proto=False, wait_other_notice=False, jvm_args=[], profile_options=None, debug=False):
         self.start_apacheds()
-        started = super(DseCluster, self).start(no_wait, verbose, wait_for_binary_proto, wait_other_notice, jvm_args, profile_options)
+        started = super(DseCluster, self).start(no_wait, verbose, wait_for_binary_proto, wait_other_notice, jvm_args, profile_options, debug)
         self.start_opscenter()
 
         return started
@@ -90,35 +90,9 @@ class DseCluster(Cluster):
             raise common.ArgumentError("You can only delete users from the ldap server if LDAP or Kerberos authentication are enabled")
         auth_util.delete_user(userid)
 
-    def set_xml_configuration_options(self, product=None, values=None):
+    def set_xml_configuration_options(self, product=None, file=None, values=None):
         for node in self.nodes.values():
-            if product == 'hadoop':
-                site_xml = os.path.join(node.get_path(), 'resources', 'hadoop', 'conf', 'dse-core.xml')
-            elif product == 'hive':
-                site_xml = os.path.join(node.get_path(), 'resources', 'hive', 'conf', 'hive-site.xml')
-            elif product == 'sqoop':
-                site_xml = os.path.join(node.get_path(), 'resources', 'sqoop', 'conf', 'sqoop-site.xml')
-            tree = etree.parse(site_xml, etree.XMLParser(remove_blank_text=True))
-            configuration = tree.getroot()
-            for name, value in iteritems(values):
-                properties = configuration.xpath('./property/name[text()="%s"]/..' % name)
-                if len(properties) > 0:
-                    property = properties[0]
-                    if value is None or len(value) == 0:
-                        configuration.remove(property)
-                    else:
-                        property.xpath('./value')[0].text = value
-                else:
-                    property = etree.Element('property')
-                    nameElement = etree.Element('name')
-                    nameElement.text = name
-                    valueElement = etree.Element('value')
-                    valueElement.text = value
-                    property.append(nameElement)
-                    property.append(valueElement)
-                    configuration.append(property)
-            with open(site_xml, 'w') as fout:
-                fout.write(etree.tostring(tree, pretty_print=True, encoding='utf8'))
+            node.set_xml_configuration_options(product, file, values)
 
     def start_opscenter(self):
         if self.hasOpscenter():
@@ -149,15 +123,15 @@ class DseCluster(Cluster):
     def stop_apacheds(self):
         if self.authn in ['ldap', 'kerberos']:
             pidfile = os.path.join(self.get_path(), 'apacheds', 'instances', 'default', 'run', 'apacheds.pid')
-        if os.path.exists(pidfile):
-            with open(pidfile, 'r') as f:
-                pid = int(f.readline().strip())
-                f.close()
-            if pid is not None:
-                args = [os.path.join(self.get_path(), 'apacheds', 'bin', 'apacheds.sh'), 'stop']
-                subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                while common.check_process(pid):
-                    time.sleep(1)
+            if os.path.exists(pidfile):
+                with open(pidfile, 'r') as f:
+                    pid = int(f.readline().strip())
+                    f.close()
+                if pid is not None:
+                    args = [os.path.join(self.get_path(), 'apacheds', 'bin', 'apacheds.sh'), 'stop']
+                    subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    while common.check_process(pid):
+                        time.sleep(1)
 
     def write_opscenter_cluster_config(self):
         cluster_conf = os.path.join(self.get_path(), 'opscenter', 'conf', 'clusters')
@@ -225,13 +199,26 @@ class DseCluster(Cluster):
             f.write('    admin_server = 127.0.0.1\n')
             f.write('    }\n')
             f.close()
+        username = getpass.getuser()
+        self.set_xml_configuration_options('hadoop', 'mapred-site.xml', {'mapred.task.tracker.task-controller' : 'org.apache.hadoop.mapred.DefaultTaskController'})
+        self.set_xml_configuration_options('hadoop', 'core-site.xml', {'hadoop.security.auth_to_local' : 'RULE:[1:$1](.*)s/.*/%s/\nRULE:[2:$1](.*)s/.*/%s/\nDEFAULT' % (username, username)})
+        auth_util.add_service_principal('dse')
+        auth_util.add_service_principal('HTTP')
         for node in list(self.nodes.values()):
-            auth_util.add_service_principal('dse_%s' % node.name)
-            auth_util.add_service_principal('HTTP_%s' % node.name)
-            node.set_dse_configuration_options(values={'kerberos_options' : { 'http_principal' : 'HTTP_%s/localhost@EXAMPLE.COM' % node.name,
+            # auth_util.add_service_principal('dse_%s' % node.name)
+            # auth_util.add_service_principal('HTTP_%s' % node.name)
+            # node.set_dse_configuration_options(values={'kerberos_options' : { 'http_principal' : 'HTTP_%s/localhost@EXAMPLE.COM' % node.name,
+            #                                                                   'keytab' : os.path.join(self.get_path(), node.name, 'dse.keytab'),
+            #                                                                   'service_principal' : 'dse_%s/localhost@EXAMPLE.COM' % node.name}})
+            # node.set_xml_configuration_options('hadoop', 'mapred-site.xml', { 'mapreduce.jobtracker.kerberos.principal' : 'dse_%s/localhost@EXAMPLE.COM' % node.name,
+            #                                                                   'mapreduce.jobtracker.kerberos.https.principal' : 'HTTP_%s/localhost@EXAMPLE.COM' % node.name,
+            #                                                                   'mapreduce.tasktracker.kerberos.principal' : 'dse_%s/localhost@EXAMPLE.COM' % node.name,
+            #                                                                   'mapreduce.tasktracker.kerberos.https.principal' : 'HTTP_%s/localhost@EXAMPLE.COM' % node.name,})
+            node.set_dse_configuration_options(values={'kerberos_options' : { 'http_principal' : 'HTTP/localhost@EXAMPLE.COM',
                                                                               'keytab' : os.path.join(self.get_path(), node.name, 'dse.keytab'),
-                                                                              'service_principal' : 'dse_%s/localhost@EXAMPLE.COM' % node.name}})
+                                                                              'service_principal' : 'dse/localhost@EXAMPLE.COM'}})
+            node.set_xml_configuration_options('hadoop', 'mapred-site.xml', { 'mapreduce.jobtracker.kerberos.principal' : 'dse/localhost@EXAMPLE.COM',
+                                                                              'mapreduce.jobtracker.kerberos.https.principal' : 'HTTP/localhost@EXAMPLE.COM',
+                                                                              'mapreduce.tasktracker.kerberos.principal' : 'dse/localhost@EXAMPLE.COM',
+                                                                              'mapreduce.tasktracker.kerberos.https.principal' : 'HTTP/localhost@EXAMPLE.COM'})
             auth_util.write_keytab(os.path.join(self.get_path(), node.name, 'dse.keytab'), node.name)
-
-
-

@@ -226,6 +226,9 @@ class Node(object):
     def set_dse_configuration_options(self, values=None):
         pass
 
+    def set_xml_configuration_options(self, product=None, file=None, values=None):
+        pass
+
     def show(self, only_status=False, show_cluster=True):
         """
         Print infos on this node configuration.
@@ -420,7 +423,8 @@ class Node(object):
               jvm_args=[],
               wait_for_binary_proto=True,
               profile_options=None,
-              use_jna=False):
+              use_jna=False,
+              debug=False):
         """
         Start the node. Options includes:
           - join_ring: if false, start the node with -Dcassandra.join_ring=False

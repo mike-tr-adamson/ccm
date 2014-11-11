@@ -1,6 +1,7 @@
 import os
 import sys
 import tailer
+import re
 
 from six import print_
 
@@ -99,17 +100,23 @@ class NodeTaillogCmd(Cmd):
         return "Tail the system.log of node name"
 
     def get_parser(self):
-        usage = "usage: ccm node_name taillog"
+        usage = "usage: ccm node_name taillog <expr>"
         return self._get_default_parser(usage, self.description())
 
     def validate(self, parser, options, args):
         Cmd.validate(self, parser, options, args, node_name=True, load_cluster=True)
+        self.expr = None
+        if len(args) > 1:
+            self.expr = args[1]
 
     def run(self):
         log = self.node.logfilename()
+        if not self.expr is None:
+            pattern = re.compile(self.expr)
         try:
             for line in tailer.follow(open(log), delay=0.1):
-                print_(line)
+                if self.expr is None or pattern.search(line):
+                    print_(line)
         except KeyboardInterrupt:
             print_('\n')
             pass

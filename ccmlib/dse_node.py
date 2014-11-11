@@ -9,6 +9,7 @@ import yaml
 import signal
 
 from six import print_, iteritems
+from lxml import etree
 from ccmlib.node import Node
 from ccmlib.node import NodeError
 from ccmlib import common
@@ -59,6 +60,30 @@ class DseNode(Node):
                 self._dse_config_options[k] = v
         self.import_dse_config_files()
 
+    def set_xml_configuration_options(self, product=None, file=None, values=None):
+        site_xml = os.path.join(self.get_path(), 'resources', product, 'conf', file)
+        tree = etree.parse(site_xml, etree.XMLParser(remove_blank_text=True))
+        configuration = tree.getroot()
+        for name, value in iteritems(values):
+            properties = configuration.xpath('./property/name[text()="%s"]/..' % name)
+            if len(properties) > 0:
+                property = properties[0]
+                if value is None or len(value) == 0:
+                    configuration.remove(property)
+                else:
+                    property.xpath('./value')[0].text = value
+            else:
+                property = etree.Element('property')
+                nameElement = etree.Element('name')
+                nameElement.text = name
+                valueElement = etree.Element('value')
+                valueElement.text = value
+                property.append(nameElement)
+                property.append(valueElement)
+                configuration.append(property)
+        with open(site_xml, 'w') as fout:
+            fout.write(etree.tostring(tree, pretty_print=True, encoding='utf8'))
+
     def start(self,
               join_ring=True,
               no_wait=False,
@@ -70,7 +95,8 @@ class DseNode(Node):
               jvm_args=[],
               wait_for_binary_proto=False,
               profile_options=None,
-              use_jna=False):
+              use_jna=False,
+              debug=False):
         """
         Start the node. Options includes:
           - join_ring: if false, start the node with -Dcassandra.join_ring=False
@@ -135,6 +161,12 @@ class DseNode(Node):
             if 'cfs' in self.workload:
                 args.append('-c')
 
+        if debug:
+            (ip, port) = self.network_interfaces['thrift']
+            env['JVM_EXTRA_OPTS'] = '-Xrunjdwp:transport=dt_socket,address=%d,server=y,suspend=n' % (2345 + int(ip[-1]))
+
+        # args.append('-f')
+
         args += [ '-p', pidfile, '-Dcassandra.join_ring=%s' % str(join_ring) ]
         if replace_token is not None:
             args.append('-Dcassandra.replace_token=%s' % str(replace_token))
@@ -144,6 +176,9 @@ class DseNode(Node):
             args.append('-Dcassandra.boot_without_jna=true')
         if self.cluster.authn == 'kerberos':
             env['JVM_OPTS'] = '-Djava.security.krb5.conf=%s' % os.path.join(self.cluster.get_path(), 'krb5.conf')
+            # env['HADOOP_OPTS'] = '-Dsun.security.krb5.debug=true -Djava.security.debug=gssloginconfig,logincontext,provider'
+            # env['KRB5_TRACE'] = os.path.join(self.get_path(), 'logs', 'krb5.log')
+            env['KRB5_CONFIG'] = os.path.join(self.cluster.get_path(), 'krb5.conf')
 
         args = args + jvm_args
 
@@ -155,6 +190,7 @@ class DseNode(Node):
             process = subprocess.Popen(args, cwd=self.get_bin_dir(), env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         else:
             process = subprocess.Popen(args, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            # process = subprocess.Popen(args, env=env, stdout=open(os.path.join(self.get_path(), 'logs', 'system.out'), 'wb'), stderr=subprocess.STDOUT)
 
         # Our modified batch file writes a dirty output with more than just the pid - clean it to get in parity
         # with *nix operation here.

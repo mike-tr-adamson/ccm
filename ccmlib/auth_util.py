@@ -87,7 +87,8 @@ def write_keytab(keytab_file, node):
     connection = make_connection()
     with open(keytab_file, "wb") as f:
         f.write(bytearray([0x05, 0x02]))
-        for spn in ['dse_%s' % node, 'HTTP_%s' % node]:
+        # for spn in ['dse_%s' % node, 'HTTP_%s' % node]:
+        for spn in ['dse', 'HTTP']:
             (_, attrs) = connection.search_s('cn=%s,ou=users,dc=example,dc=com' % spn, ldap.SCOPE_BASE)[0]
             for krbkey in cidict(attrs)['krb5key']:
                 key_type = struct.unpack('B', krbkey[6])[0]

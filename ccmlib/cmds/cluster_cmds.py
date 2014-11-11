@@ -481,6 +481,8 @@ class ClusterStartCmd(Cmd):
             help="Start the nodes with yourkit agent (only valid with -s)", default=False)
         parser.add_option('--profile-opts', type="string", action="store", dest="profile_options",
             help="Yourkit options when profiling", default=None)
+        parser.add_option('--debug', action="store_true", dest="debug",
+            help="Yourkit options when profiling", default=None)
         return parser
 
     def validate(self, parser, options, args):
@@ -498,7 +500,8 @@ class ClusterStartCmd(Cmd):
                                   wait_for_binary_proto=self.options.wait_for_binary_proto,
                                   verbose=self.options.verbose,
                                   jvm_args=self.options.jvm_args,
-                                  profile_options=profile_options) is None:
+                                  profile_options=profile_options,
+                                  debug=self.options.debug) is None:
                 details = ""
                 if not self.options.verbose:
                     details = " (you can use --verbose for more information)"
@@ -816,7 +819,7 @@ class ClusterUpdatexmlconfCmd(Cmd):
         return "Update the dse hadoop/sqoop/hive site configuration files."
 
     def get_parser(self):
-        usage = "usage: ccm updatexmlconf [hadoop, sqoop, hive] [property:value, ...]"
+        usage = "usage: ccm updatexmlconf [hadoop, sqoop, hive] [file] [property:value, ...]"
         parser = self._get_default_parser(usage, self.description())
         return parser
 
@@ -824,13 +827,14 @@ class ClusterUpdatexmlconfCmd(Cmd):
         Cmd.validate(self, parser, options, args, load_cluster=True)
         try:
             self.product = args[0]
-            self.setting = common.parse_settings(args[1:])
+            self.file = args[1]
+            self.setting = common.parse_settings(args[2:])
         except common.ArgumentError as e:
             print_(str(e), file=sys.stderr)
             exit(1)
 
     def run(self):
-        self.cluster.set_xml_configuration_options(product=self.product, values=self.setting)
+        self.cluster.set_xml_configuration_options(product=self.product, file=self.file, values=self.setting)
 
 class ClusterDeleteuserCmd(Cmd):
     def description(self):

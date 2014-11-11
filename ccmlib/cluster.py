@@ -246,7 +246,7 @@ class Cluster(object):
             else:
                 node.show(only_status=True)
 
-    def start(self, no_wait=False, verbose=False, wait_for_binary_proto=True, wait_other_notice=False, jvm_args=[], profile_options=None):
+    def start(self, no_wait=False, verbose=False, wait_for_binary_proto=True, wait_other_notice=False, jvm_args=[], profile_options=None, debug=False):
         if wait_other_notice:
             marks = [ (node, node.mark_log()) for node in list(self.nodes.values()) if node.is_running() ]
 
@@ -257,7 +257,7 @@ class Cluster(object):
                 if os.path.exists(node.logfilename()):
                     mark = node.mark_log()
 
-                p = node.start(update_pid=False, jvm_args=jvm_args, profile_options=profile_options)
+                p = node.start(update_pid=False, jvm_args=jvm_args, profile_options=profile_options, debug=debug)
                 started.append((node, p, mark))
 
         if no_wait and not verbose:
@@ -364,7 +364,7 @@ class Cluster(object):
     def set_dse_configuration_options(self, values=None):
         raise common.ArgumentError('Cannot set DSE configuration options on a Cassandra cluster')
 
-    def set_xml_configuration_options(self, product=None, values=None):
+    def set_xml_configuration_options(self, product=None, file=None, values=None):
         raise common.ArgumentError('Cannot set hadoop configuration options on a Cassandra cluster')
 
     def flush(self):
